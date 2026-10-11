@@ -299,7 +299,8 @@ else {
   build(); setRange(0);
   const g = D.gold.total;
   $("meta").innerHTML = `持仓量数据截至 <b>${g[g.length - 1][0]}</b>（CME 每日公报，收盘后发布）· 页面更新于 ${bjTime(D.updated)}`;
-  $("note").innerHTML = `数据来源于 CME Group 公开日报，版权归其所有；本页仅供个人研究、非商业用途，不构成投资建议。`;
+  $("note").innerHTML = `数据来源于 CME Group 公开日报，价格为 Yahoo Finance 日线，图表由 <a href="https://tradingview.com" target="_blank" rel="noopener" style="color:#6ea8fe">TradingView</a> Lightweight Charts™ 提供。<br>
+    声明：本页数据来自上述公开来源，版权归原发布机构所有；本页仅供个人研究与学习，非商业用途，不构成任何投资建议。`;
 }
 </script>
 </body>
