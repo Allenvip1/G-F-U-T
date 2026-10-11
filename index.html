@@ -200,6 +200,7 @@ function build() {
     m.sMfi = lb; lb.setData([...m.mfi].map(([t, v]) => ({ time: t, value: v })));
     const lf = cf.addLineSeries({ color: "#f06292", lineWidth: 2, priceLineVisible: false, priceFormat: { type: "price", precision: 3, minMove: 0.001 } });
     m.sCmf = lf; lf.setData([...m.cmf].map(([t, v]) => ({ time: t, value: v })));
+    [[0.1, "#ef5350"], [-0.1, "#26a69a"]].forEach(([v, c]) => lf.createPriceLine({ price: v, color: c, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "" }));
     lf.createPriceLine({ price: 0, color: "#ffd54f", lineWidth: 1, lineStyle: 0, axisLabelVisible: false, title: "" });
     [[80, "#ef5350"], [20, "#26a69a"]].forEach(([v, c]) => lb.createPriceLine({ price: v, color: c, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "" }));
     const la = ca.addLineSeries({ color: "#4db6ac", lineWidth: 2, priceLineVisible: false, priceFormat: intFmt });
