@@ -44,7 +44,7 @@
     <button data-m="1">1个月</button><button data-m="3">3个月</button><button data-m="6">6个月</button><button data-m="0" class="on">全部</button>
     <span style="width:1px;height:20px;background:var(--line);margin:0 6px"></span>
     <label style="font-size:13px"><input type="checkbox" id="pivOn" checked> 价格顶底</label>
-    <label style="font-size:13px"><input type="checkbox" id="divOn" checked> 量价背离箭头（MFI / A/D）</label><span id="divN" style="font-size:12px;color:var(--dim)"></span>
+    <label style="font-size:13px"><input type="checkbox" id="divOn" checked> 量价背离箭头（MFI / A/D / CMF）</label><span id="divN" style="font-size:12px;color:var(--dim)"></span>
     <label style="font-size:13px">反转 ≥ <input type="number" id="pivPct" value="8" min="2" max="30" step="0.5" style="width:60px;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:3px 6px"> %</label>
   </div>
   <div class="grid" id="grid"></div>
@@ -103,7 +103,7 @@ function findDivs(m, piv) {
     for (let k = 1; k < L.length; k++) {
       const a = L[k - 1], b = L[k], top = t === "顶";
       if (top ? !(b.v > a.v) : !(b.v < a.v)) continue;
-      [["MFI", m.mfi], ["A/D", m.ad]].forEach(([name, map]) => {
+      [["MFI", m.mfi], ["A/D", m.ad], ["CMF", m.cmf]].forEach(([name, map]) => {
         const va = near(map, a.i, top), vb = near(map, b.i, top);
         if (va != null && vb != null && (top ? vb < va : vb > va)) { if (!out.has(b.i)) out.set(b.i, []); if (!out.get(b.i).includes(name)) out.get(b.i).push(name); }
       });
@@ -115,20 +115,20 @@ function applyPivots() {
   const on = $("pivOn").checked, dOn = $("divOn").checked, thr = Math.max(1, +$("pivPct").value || 8) / 100;
   METALS.forEach(m => {
     if (!m.candle) return;
-    const piv = zigzag(m.prow, thr), divs = dOn ? findDivs(m, piv) : new Map(), mk = [], im = [], ia = [];
+    const piv = zigzag(m.prow, thr), divs = dOn ? findDivs(m, piv) : new Map(), mk = [], im = [], ia = [], ic = [];
     piv.forEach(p => {
       const d = divs.get(p.i), top = p.t === "顶", t = m.prow[p.i].time;
       if (d) {
         mk.push({ time: t, position: top ? "aboveBar" : "belowBar", shape: top ? "arrowDown" : "arrowUp", color: "#e040fb", text: `${p.t}背离(${d.join("+")}) ${Math.round(p.v)}` });
         const dm = { time: t, position: top ? "aboveBar" : "belowBar", shape: "circle", color: "#e040fb", text: `${p.t}背离` };
-        if (d.includes("MFI") && m.mfi.has(t)) im.push(dm); if (d.includes("A/D") && m.ad.has(t)) ia.push(dm);
+        if (d.includes("MFI") && m.mfi.has(t)) im.push(dm); if (d.includes("A/D") && m.ad.has(t)) ia.push(dm); if (d.includes("CMF") && m.cmf.has(t)) ic.push(dm);
       } else if (on) {
         mk.push({ time: t, position: top ? "aboveBar" : "belowBar", shape: top ? "arrowDown" : "arrowUp",
           color: p.ok ? (top ? "#ff5252" : "#00e676") : "#b0bec5", text: `${p.t}${p.ok ? "" : "?"} ${Math.round(p.v)}` });
       }
     });
-    const byT = (a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0); mk.sort(byT); im.sort(byT); ia.sort(byT);
-    m.candle.setMarkers(mk); m.sMfi.setMarkers(im); m.sAd.setMarkers(ia);
+    const byT = (a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0); mk.sort(byT); im.sort(byT); ia.sort(byT); ic.sort(byT);
+    m.candle.setMarkers(mk); m.sMfi.setMarkers(im); m.sAd.setMarkers(ia); m.sCmf.setMarkers(ic);
     m.divCount = [...divs.values()].length;
   });
   const n = METALS.map(m => `${m.name} ${m.divCount || 0} 处`).join("，");
@@ -167,17 +167,24 @@ function build() {
         prevTp = tp;
         acc += h === l ? 0 : (((c - l) - (h - c)) / (h - l)) * t.vol; m.ad.set(r[0], acc); });
     }
+    // CMF(20)：近 20 个"有行情又有成交量"的交易日，Σ(收盘位置系数 × 成交量) ÷ Σ成交量，范围 −1~+1
+    m.cmf = new Map(); { const win = [];
+      x.price.forEach(r => { const t = m.tByDate.get(r[0]); if (!t) return;
+        const h = r[2], l = r[3], c = r[4];
+        win.push({ mf: h === l ? 0 : (((c - l) - (h - c)) / (h - l)) * t.vol, v: t.vol }); if (win.length > 20) win.shift();
+        if (win.length === 20) { const V = win.reduce((a, f) => a + f.v, 0); if (V > 0) m.cmf.set(r[0], win.reduce((a, f) => a + f.mf, 0) / V); } }); }
     const col = document.createElement("div"); col.className = "col";
     col.innerHTML = `<h2>${m.name}</h2><div class="legend" id="lg_${m.key}"></div>
       <div class="card"><div class="ttl">① ${m.name}日线（${m.price}）· 红涨绿跌</div><div id="p_${m.key}"></div></div>
       <div class="card"><div class="ttl"><i style="background:${m.color}"></i>② ${m.fut} 总持仓量（手，所有合约月份合计）</div><div id="o_${m.key}"></div></div>
       <div class="card"><div class="ttl"><i style="background:#ba68c8"></i>③ MFI（14）资金流量指标：0~100，&gt;80 超买、&lt;20 超卖；价格新高而 MFI 不创新高 = 顶背离</div><div id="b_${m.key}"></div></div>
-      <div class="card"><div class="ttl"><i style="background:#4db6ac"></i>④ A/D 累积/派发线（累计）：收盘靠近当日高点算买盘、靠近低点算卖盘，乘以成交量后累计</div><div id="a_${m.key}"></div></div>
-      <div class="card"><div class="ttl">⑤ 每日持仓量变化（手）· 红增仓 绿减仓</div><div id="c_${m.key}"></div></div>
-      <div class="card"><div class="ttl">⑥ 总成交量（手）· 红柱=当日收盘上涨 绿柱=下跌</div><div id="v_${m.key}"></div></div>`;
+      <div class="card"><div class="ttl"><i style="background:#f06292"></i>④ CMF（20）蔡金资金流：−1~+1，&gt;0 买压占优、&lt;0 卖压占优；价格新高而 CMF 不创新高 = 顶背离</div><div id="f_${m.key}"></div></div>
+      <div class="card"><div class="ttl"><i style="background:#4db6ac"></i>⑤ A/D 累积/派发线（累计）：收盘靠近当日高点算买盘、靠近低点算卖盘，乘以成交量后累计</div><div id="a_${m.key}"></div></div>
+      <div class="card"><div class="ttl">⑥ 每日持仓量变化（手）· 红增仓 绿减仓</div><div id="c_${m.key}"></div></div>
+      <div class="card"><div class="ttl">⑦ 总成交量（手）· 红柱=当日收盘上涨 绿柱=下跌</div><div id="v_${m.key}"></div></div>`;
     $("grid").appendChild(col);
     const dp = m.key === "gold" ? 1 : 2;
-    const cp = mk($("p_" + m.key), 300), co = mk($("o_" + m.key), 190), cc = mk($("c_" + m.key), 150), cv = mk($("v_" + m.key), 130), cb = mk($("b_" + m.key), 170), ca = mk($("a_" + m.key), 170);
+    const cp = mk($("p_" + m.key), 300), co = mk($("o_" + m.key), 190), cc = mk($("c_" + m.key), 150), cv = mk($("v_" + m.key), 130), cb = mk($("b_" + m.key), 170), cf = mk($("f_" + m.key), 170), ca = mk($("a_" + m.key), 170);
     const candle = cp.addCandlestickSeries({ upColor: "#ef5350", downColor: "#26a69a", borderUpColor: "#ef5350", borderDownColor: "#26a69a", wickUpColor: "#ef5350", wickDownColor: "#26a69a",
       priceFormat: { type: "price", precision: dp, minMove: Math.pow(10, -dp) } });
     m.prow = x.price.map(r => ({ time: r[0], open: r[1], high: r[2], low: r[3], close: r[4] })); m.candle = candle;
@@ -191,15 +198,19 @@ function build() {
     hv.setData(x.total.map(r => { const c = m.pChg.get(r[0]); return { time: r[0], value: r[1], color: c > 0 ? "#ef5350" : c < 0 ? "#26a69a" : "#7e8aa8" }; }));
     const lb = cb.addLineSeries({ color: "#ba68c8", lineWidth: 2, priceLineVisible: false, priceFormat: { type: "price", precision: 1, minMove: 0.1 } });
     m.sMfi = lb; lb.setData([...m.mfi].map(([t, v]) => ({ time: t, value: v })));
+    const lf = cf.addLineSeries({ color: "#f06292", lineWidth: 2, priceLineVisible: false, priceFormat: { type: "price", precision: 3, minMove: 0.001 } });
+    m.sCmf = lf; lf.setData([...m.cmf].map(([t, v]) => ({ time: t, value: v })));
+    lf.createPriceLine({ price: 0, color: "#ffd54f", lineWidth: 1, lineStyle: 0, axisLabelVisible: false, title: "" });
     [[80, "#ef5350"], [20, "#26a69a"]].forEach(([v, c]) => lb.createPriceLine({ price: v, color: c, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "" }));
     const la = ca.addLineSeries({ color: "#4db6ac", lineWidth: 2, priceLineVisible: false, priceFormat: intFmt });
     m.sAd = la; la.setData([...m.ad].map(([t, v]) => ({ time: t, value: v })));
-    [cp, co, cc, cv, cb, ca].forEach(c => c.addLineSeries({ visible: false, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }).setData(CAL.map(t => ({ time: t }))));
+    [cp, co, cc, cv, cb, ca, cf].forEach(c => c.addLineSeries({ visible: false, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }).setData(CAL.map(t => ({ time: t }))));
     const reg = (kind, chart, series, get) => ALL.push({ kind, metal: m.key, el: $(kind + "_" + m.key), chart, series, get });
     reg("p", cp, candle, d => { const r = m.pByDate.get(d); return r ? r[4] : null; });
     reg("o", co, lo, d => { const r = m.tByDate.get(d); return r ? r.oi : null; });
     reg("c", cc, hc, d => { const r = m.tByDate.get(d); return r ? r.chg : null; });
     reg("b", cb, lb, d => m.mfi.has(d) ? m.mfi.get(d) : null);
+    reg("f", cf, lf, d => m.cmf.has(d) ? m.cmf.get(d) : null);
     reg("a", ca, la, d => m.ad.has(d) ? m.ad.get(d) : null);
     reg("v", cv, hv, d => { const r = m.tByDate.get(d); return r ? r.vol : null; });
   });
@@ -222,6 +233,7 @@ function tipHtml(e, t) {
     row(b("总成交量", e.kind === "v"), `<span class="${e.kind === "v" ? "big" : ""}">${fmt(r.vol)} 手</span>`);
   h += row(b("MFI(14)", e.kind === "b"), `<span class="${e.kind === "b" ? "big" : ""}">${m.mfi.has(t) ? fmt(m.mfi.get(t), 1) : "–"}</span>`);
   h += row(b("A/D 线", e.kind === "a"), `<span class="${e.kind === "a" ? "big" : ""}">${m.ad.has(t) ? fmt(m.ad.get(t)) : "–"}</span>`);
+  h += row(b("CMF(20)", e.kind === "f"), `<span class="${e.kind === "f" ? "big" : ""}">${m.cmf.has(t) ? sgn(m.cmf.get(t), 3) : "–"}</span>`);
   h += row("价格涨跌", sgn(m.pChg.get(t), m.key === "gold" ? 1 : 2)) + row("价仓关系", reading(m.pChg.get(t), r.chg));
   return h;
 }
