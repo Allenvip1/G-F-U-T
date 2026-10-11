@@ -31,8 +31,18 @@ def main() -> None:
             "price": [[r["date"], float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"])] for r in rd(pf)],
             "total": sorted(totals[metal]),
         }
-    js = "window.FUT_DATA=" + json.dumps(out, separators=(",", ":"), ensure_ascii=False) + ";"
     html = HTML.read_text(encoding="utf-8")
+    # 数据没变化就不重写页面：这样"页面更新于"保持上一次真正更新数据的时间，也不会产生空提交去触发多余的部署
+    old = re.search(r'<script id="fut-data">window\.FUT_DATA=(.*?);</script>', html, flags=re.S)
+    if old:
+        try:
+            prev = json.loads(old.group(1))
+            if {k: v for k, v in prev.items() if k != "updated"} == {k: v for k, v in out.items() if k != "updated"}:
+                print("数据没有变化，保持页面不变。")
+                return
+        except ValueError:
+            pass
+    js = "window.FUT_DATA=" + json.dumps(out, separators=(",", ":"), ensure_ascii=False) + ";"
     new, n = re.subn(r'(<script id="fut-data">).*?(</script>)', lambda m: m.group(1) + js + m.group(2), html, count=1, flags=re.S)
     if n != 1:
         raise SystemExit("index.html 里没找到 <script id=\"fut-data\">")

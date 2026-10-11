@@ -66,6 +66,9 @@ const css = { layout: { background: { color: "transparent" }, textColor: "#d1d4d
 const fmt = (v, d = 0) => v == null ? "–" : v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 const sgn = (v, d = 0) => v == null ? "–" : `<span class="${v > 0 ? "u" : v < 0 ? "d" : ""}">${v > 0 ? "+" : ""}${fmt(v, d)}</span>`;
 const WD = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+const bjTime = s => { const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(s || ""); if (!m) return s || "";      // 数据里存的是 UTC，页面上换成北京时间显示
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4] + 8, +m[5])), p = n => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}（北京时间）`; };
 const wday = d => WD[new Date(d + "T00:00:00Z").getUTCDay()];
 const row = (k, v) => `<div class="r"><span>${k}</span><span>${v}</span></div>`;
 
@@ -295,7 +298,7 @@ if (!D) { $("meta").textContent = "没有数据：请先运行 scripts/build.py"
 else {
   build(); setRange(0);
   const g = D.gold.total;
-  $("meta").innerHTML = `持仓量数据截至 <b>${g[g.length - 1][0]}</b>（CME 每日公报，收盘后发布）· 页面更新于 ${D.updated}`;
+  $("meta").innerHTML = `持仓量数据截至 <b>${g[g.length - 1][0]}</b>（CME 每日公报，收盘后发布）· 页面更新于 ${bjTime(D.updated)}`;
   $("note").innerHTML = `数据来源于 CME Group 公开日报，版权归其所有；本页仅供个人研究、非商业用途，不构成投资建议。`;
 }
 </script>
