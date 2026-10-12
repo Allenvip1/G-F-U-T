@@ -14,7 +14,9 @@
   .wrap { max-width:1600px; margin:0 auto; padding:16px; }
   h1 { font-size:18px; margin:0 0 4px; }
   #meta { color:var(--dim); font-size:12px; margin-bottom:10px; }
-  .controls { backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px; position:sticky; top:0; z-index:5; background:rgba(19,23,34,.88); padding:6px 8px; border-radius:6px; }
+  .controls { backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; background:rgba(19,23,34,.88); padding:6px 8px; border-radius:6px; }
+  .stick { position:sticky; top:0; z-index:6; background:rgba(14,17,26,.94); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); margin:0 -16px 10px; padding:8px 16px 0; border-bottom:1px solid var(--line); }
+  .stick .card { margin-bottom:8px; }
   button { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:5px 12px; font:inherit; cursor:pointer; }
   button:hover { border-color:#4a5163; } button.on { background:#2962ff; border-color:#2962ff; color:#fff; }
   .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
@@ -33,19 +35,22 @@
   th, td { padding:4px 8px; text-align:right; border-bottom:1px solid var(--line); } th:first-child, td:first-child { text-align:left; }
   th { color:var(--dim); font-weight:600; }
   .note { color:var(--dim); font-size:12px; margin-top:10px; }
-  @media (max-width:900px) { .grid { grid-template-columns:1fr; } }
+  @media (max-width:900px) { .grid { grid-template-columns:1fr; } .stick { position:static; } }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>黄金 / 白银 期货持仓量</h1>
   <div id="meta">加载中…</div>
+  <div class="stick" id="stick">
   <div class="controls">
     <button data-m="1">1个月</button><button data-m="3">3个月</button><button data-m="6">6个月</button><button data-m="0" class="on">全部</button>
     <span style="width:1px;height:20px;background:var(--line);margin:0 6px"></span>
     <label style="font-size:13px"><input type="checkbox" id="pivOn" checked> 价格顶底</label>
     <label style="font-size:13px"><input type="checkbox" id="divOn" checked> 量价背离箭头（MFI / A/D / CMF）</label><span id="divN" style="font-size:12px;color:var(--dim)"></span>
     <label style="font-size:13px">反转 ≥ <input type="number" id="pivPct" value="8" min="2" max="30" step="0.5" style="width:60px;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:3px 6px"> %</label>
+  </div>
+  <div class="grid" id="top"></div>
   </div>
   <div class="grid" id="grid"></div>
   <div class="grid" id="sum"></div>
@@ -176,9 +181,12 @@ function build() {
         const h = r[2], l = r[3], c = r[4];
         win.push({ mf: h === l ? 0 : (((c - l) - (h - c)) / (h - l)) * t.vol, v: t.vol }); if (win.length > 20) win.shift();
         if (win.length === 20) { const V = win.reduce((a, f) => a + f.v, 0); if (V > 0) m.cmf.set(r[0], win.reduce((a, f) => a + f.mf, 0) / V); } }); }
+    const colTop = document.createElement("div"); colTop.className = "col";
+    colTop.innerHTML = `<h2>${m.name}</h2><div class="legend" id="lg_${m.key}"></div>
+      <div class="card"><div class="ttl">① ${m.name}日线（${m.price}）· 红涨绿跌</div><div id="p_${m.key}"></div></div>`;
+    $("top").appendChild(colTop);
     const col = document.createElement("div"); col.className = "col";
-    col.innerHTML = `<h2>${m.name}</h2><div class="legend" id="lg_${m.key}"></div>
-      <div class="card"><div class="ttl">① ${m.name}日线（${m.price}）· 红涨绿跌</div><div id="p_${m.key}"></div></div>
+    col.innerHTML = `
       <div class="card"><div class="ttl"><i style="background:${m.color}"></i>② ${m.fut} 总持仓量（手，所有合约月份合计）</div><div id="o_${m.key}"></div></div>
       <div class="card"><div class="ttl"><i style="background:#ba68c8"></i>③ MFI（14）资金流量指标：0~100，&gt;80 超买、&lt;20 超卖；价格新高而 MFI 不创新高 = 顶背离</div><div id="b_${m.key}"></div></div>
       <div class="card"><div class="ttl"><i style="background:#f06292"></i>④ CMF（20）蔡金资金流：−1~+1，&gt;0 买压占优、&lt;0 卖压占优；价格新高而 CMF 不创新高 = 顶背离</div><div id="f_${m.key}"></div></div>
@@ -187,7 +195,7 @@ function build() {
       <div class="card"><div class="ttl">⑦ 总成交量（手）· 红柱=当日收盘上涨 绿柱=下跌</div><div id="v_${m.key}"></div></div>`;
     $("grid").appendChild(col);
     const dp = m.key === "gold" ? 1 : 2;
-    const cp = mk($("p_" + m.key), 300), co = mk($("o_" + m.key), 190), cc = mk($("c_" + m.key), 150), cv = mk($("v_" + m.key), 130), cb = mk($("b_" + m.key), 170), cf = mk($("f_" + m.key), 170), ca = mk($("a_" + m.key), 170);
+    const cp = mk($("p_" + m.key), 250), co = mk($("o_" + m.key), 190), cc = mk($("c_" + m.key), 150), cv = mk($("v_" + m.key), 130), cb = mk($("b_" + m.key), 170), cf = mk($("f_" + m.key), 170), ca = mk($("a_" + m.key), 170);
     const candle = cp.addCandlestickSeries({ upColor: "#ef5350", downColor: "#26a69a", borderUpColor: "#ef5350", borderDownColor: "#26a69a", wickUpColor: "#ef5350", wickDownColor: "#26a69a",
       priceFormat: { type: "price", precision: dp, minMove: Math.pow(10, -dp) } });
     m.prow = x.price.map(r => ({ time: r[0], open: r[1], high: r[2], low: r[3], close: r[4] })); m.candle = candle;
