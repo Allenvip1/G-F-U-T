@@ -26,10 +26,12 @@ def main() -> None:
     totals = defaultdict(list)
     for r in rd("futures_total.csv"):
         totals[r["metal"]].append([r["date"], int(r["vol"]), int(r["oi"]), int(r["oi_chg"])])
-    for metal, pf in (("gold", "price_gold.csv"), ("silver", "price_silver.csv")):
+    for metal, pf, vf in (("gold", "price_gold.csv", "gvz.csv"), ("silver", "price_silver.csv", "vxslv.csv")):
+        total = sorted(totals[metal])
         out[metal] = {
             "price": [[r["date"], float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"])] for r in rd(pf)],
-            "total": sorted(totals[metal]),
+            "total": total,
+            "vol": [[r["date"], float(r["close"])] for r in rd(vf) if total and r["date"] >= total[0][0]],     # 黄金 GVZ / 白银 VXSLV（波动率指数收盘）
         }
     html = HTML.read_text(encoding="utf-8")
     # 数据没变化就不重写页面：这样"页面更新于"保持上一次真正更新数据的时间，也不会产生空提交去触发多余的部署
