@@ -49,6 +49,7 @@
     <button data-m="1">1个月</button><button data-m="3">3个月</button><button data-m="6">6个月</button><button data-m="0" class="on">全部</button>
     <span style="width:1px;height:20px;background:var(--line);margin:0 6px"></span>
     <label style="font-size:13px"><input type="checkbox" id="pivOn" checked> 价格顶底</label>
+    <label style="font-size:13px">MFI 周期 <input type="number" id="mfiLen" value="14" min="2" max="60" step="1" style="width:56px;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:3px 6px"></label>
     <label style="font-size:13px"><input type="checkbox" id="divOn" checked> 量价背离箭头（MFI / A/D / CMF）</label><span id="divN" style="font-size:12px;color:var(--dim)"></span>
     <label style="font-size:13px">反转 ≥ <input type="number" id="pivPct" value="8" min="2" max="30" step="0.5" style="width:60px;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:3px 6px"> %</label>
   </div>
@@ -156,6 +157,23 @@ const ALL = [];
 let HOVER = null, ACTIVE = null, syncC = false, CAL = [];
 
 function mk(el, h) { return LightweightCharts.createChart(el, { ...css, width: el.clientWidth, height: h }); }
+const mfiLen = () => Math.max(2, Math.min(60, Math.round(+$("mfiLen").value) || 14));
+// MFI(n)：典型价 =（高+低+收）/3 × 成交量 = 资金流；n 个交易日内价格上行日的资金流占比换算成 0~100（只在有行情又有成交量的日子上算）
+function calcMfi(m, n) {
+  const out = new Map(), flows = []; let prevTp = null;
+  D[m.key].price.forEach(r => { const t = m.tByDate.get(r[0]); if (!t) return;
+    const tp = (r[2] + r[3] + r[4]) / 3, raw = tp * t.vol;
+    if (prevTp != null) { flows.push({ pos: tp > prevTp ? raw : 0, neg: tp < prevTp ? raw : 0 });
+      if (flows.length >= n) { const w = flows.slice(-n), P = w.reduce((a, f) => a + f.pos, 0), N = w.reduce((a, f) => a + f.neg, 0); out.set(r[0], N === 0 ? 100 : 100 - 100 / (1 + P / N)); } }
+    prevTp = tp; });
+  return out;
+}
+function onMfiLen() {                      // 改周期：重算 MFI、刷新曲线、重新判断背离箭头
+  const n = mfiLen(); $("mfiLen").value = n;
+  document.querySelectorAll(".mfiN").forEach(e => { e.textContent = n; });
+  METALS.forEach(m => { m.mfi = calcMfi(m, n); m.sMfi.setData([...m.mfi].map(([t, v]) => ({ time: t, value: v }))); });
+  applyPivots();
+}
 function build() {
   const dates = new Set(), start = D.gold.total[0][0];      // 价格只画到持仓量数据开始的那一天，横轴才对得上
   METALS.forEach(m => { const x = D[m.key]; x.price = x.price.filter(r => r[0] >= start); x.price.forEach(r => dates.add(r[0])); x.total.forEach(r => dates.add(r[0])); });
@@ -167,17 +185,13 @@ function build() {
     m.pChg = new Map(); x.price.forEach((r, i) => { if (i) m.pChg.set(r[0], r[4] - x.price[i - 1][4]); });
     m.volByDate = new Map((x.vol || []).map(r => [r[0], r[1]]));
     m.tByDate = new Map(x.total.map(r => [r[0], { vol: r[1], oi: r[2], chg: r[3] }]));
-    // MFI(14) 与 A/D 线：只在"有行情又有成交量"的交易日上计算（缺成交量的日子跳过）
-    m.mfi = new Map(); m.ad = new Map(); {
-      const flows = []; let acc = 0, prevTp = null;
+    // A/D 线：只在"有行情又有成交量"的交易日上计算；MFI 周期可调，见 calcMfi
+    m.ad = new Map(); { let acc = 0;
       x.price.forEach(r => { const t = m.tByDate.get(r[0]); if (!t) return;
-        const h = r[2], l = r[3], c = r[4], tp = (h + l + c) / 3, raw = tp * t.vol;
-        if (prevTp != null) { flows.push({ pos: tp > prevTp ? raw : 0, neg: tp < prevTp ? raw : 0 });
-          if (flows.length >= 14) { const w = flows.slice(-14), P = w.reduce((a, f) => a + f.pos, 0), N = w.reduce((a, f) => a + f.neg, 0);
-            m.mfi.set(r[0], N === 0 ? 100 : 100 - 100 / (1 + P / N)); } }
-        prevTp = tp;
+        const h = r[2], l = r[3], c = r[4];
         acc += h === l ? 0 : (((c - l) - (h - c)) / (h - l)) * t.vol; m.ad.set(r[0], acc); });
     }
+    m.mfi = calcMfi(m, mfiLen());
     // CMF(20)：近 20 个"有行情又有成交量"的交易日，Σ(收盘位置系数 × 成交量) ÷ Σ成交量，范围 −1~+1
     m.cmf = new Map(); { const win = [];
       x.price.forEach(r => { const t = m.tByDate.get(r[0]); if (!t) return;
@@ -192,7 +206,7 @@ function build() {
     col.innerHTML = `
       <div class="card"><div class="ttl"><i style="background:#ff9800"></i>② ${m.volName}（CBOE，用 ${m.etf} 期权算出的未来 30 天年化隐含波动率，%）</div><div class="exp" id="x_${m.key}"></div><div id="g_${m.key}"></div></div>
       <div class="card"><div class="ttl"><i style="background:${m.color}"></i>③ ${m.fut} 总持仓量（手，所有合约月份合计）</div><div id="o_${m.key}"></div></div>
-      <div class="card"><div class="ttl"><i style="background:#ba68c8"></i>④ MFI（14）资金流量指标：0~100，&gt;80 超买、&lt;20 超卖；价格新高而 MFI 不创新高 = 顶背离</div><div id="b_${m.key}"></div></div>
+      <div class="card"><div class="ttl"><i style="background:#ba68c8"></i>④ MFI（<span class="mfiN">14</span>）资金流量指标：0~100，&gt;80 超买、&lt;20 超卖；价格新高而 MFI 不创新高 = 顶背离</div><div id="b_${m.key}"></div></div>
       <div class="card"><div class="ttl"><i style="background:#f06292"></i>⑤ CMF（20）蔡金资金流：−1~+1，&gt;0 买压占优、&lt;0 卖压占优；价格新高而 CMF 不创新高 = 顶背离</div><div id="f_${m.key}"></div></div>
       <div class="card"><div class="ttl"><i style="background:#4db6ac"></i>⑥ A/D 累积/派发线（累计）：收盘靠近当日高点算买盘、靠近低点算卖盘，乘以成交量后累计</div><div id="a_${m.key}"></div></div>
       <div class="card"><div class="ttl">⑦ 每日持仓量变化（手）· 红增仓 绿减仓</div><div id="c_${m.key}"></div></div>
@@ -235,7 +249,7 @@ function build() {
   });
   METALS.forEach(m => { const v = (D[m.key].vol || []).slice(-1)[0], p = D[m.key].price.slice(-1)[0]; if (v && p) $("x_" + m.key).innerHTML = expText(v[1], p[4], v[0], p[0], m.key === "gold" ? 1 : 2); });
   bind();
-  $("pivOn").onchange = applyPivots; $("divOn").onchange = applyPivots; $("pivPct").onchange = applyPivots;
+  $("mfiLen").onchange = onMfiLen; $("pivOn").onchange = applyPivots; $("divOn").onchange = applyPivots; $("pivPct").onchange = applyPivots;
   applyPivots(); legend(null); summary();
 }
 // 预期波动（约 1 个标准差，约 68% 概率落在其中）：日 = 年化波动率 ÷ √252，周 = ÷ √52，30 天 = × √(30/365)；点数按给定收盘价折算
@@ -267,7 +281,7 @@ function tipHtml(e, t) {
   let h = head + row(b("总持仓量", e.kind === "o"), `<span class="${e.kind === "o" ? "big" : ""}">${fmt(r.oi)} 手</span>`) +
     row(b("当日变化", e.kind === "c"), `<span class="${e.kind === "c" ? "big" : ""}">${sgn(r.chg)} 手</span>`) +
     row(b("总成交量", e.kind === "v"), `<span class="${e.kind === "v" ? "big" : ""}">${fmt(r.vol)} 手</span>`);
-  h += row(b("MFI(14)", e.kind === "b"), `<span class="${e.kind === "b" ? "big" : ""}">${m.mfi.has(t) ? fmt(m.mfi.get(t), 1) : "–"}</span>`);
+  h += row(b(`MFI(${mfiLen()})`, e.kind === "b"), `<span class="${e.kind === "b" ? "big" : ""}">${m.mfi.has(t) ? fmt(m.mfi.get(t), 1) : "–"}</span>`);
   h += row(b("A/D 线", e.kind === "a"), `<span class="${e.kind === "a" ? "big" : ""}">${m.ad.has(t) ? fmt(m.ad.get(t)) : "–"}</span>`);
   h += row(b("CMF(20)", e.kind === "f"), `<span class="${e.kind === "f" ? "big" : ""}">${m.cmf.has(t) ? sgn(m.cmf.get(t), 3) : "–"}</span>`);
   h += row("价格涨跌", sgn(m.pChg.get(t), m.key === "gold" ? 1 : 2)) + row("价仓关系", reading(m.pChg.get(t), r.chg));
